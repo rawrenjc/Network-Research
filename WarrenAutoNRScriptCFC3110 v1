@@ -1,0 +1,342 @@
+#!/bin/bash
+
+#CFC3110 Network Research Project
+#Name: Warren Justin Chan
+#Code: S5
+#Class: CFC3110
+#Trainer: James
+
+#The goal is to create a script that automatically connects to a remote server
+#All the user needs to do is key in ssh IP, User ID, and Password
+#At then at the end of the script, prompt the user to exit or start again
+
+
+
+#	Script wrapped in a function and case at the end to increase usability
+
+function AUTOSCAN()
+
+{
+	
+figlet -c WARREN\'S AUTO NR SCRIPT
+
+#1.		Install the needed applications.
+#1.2	If the applications are already installed, don’t install them again
+
+#	Commands are put into a variable as it is cleaner and easier to call 
+#	upon when necessary
+
+# 	To make the script as automated as possible, the -y flag was added 
+#	to install command as to accept all terms and conditions
+
+
+
+install_nmap=$(sudo apt-get install -y nmap)
+
+if [ install_nmap == 0 ]
+then
+
+$install_nmap
+
+else
+
+echo 'Nmap already installed'
+
+fi
+
+echo ''
+
+
+install_geoip=$(sudo apt-get install -y geoip-bin)
+
+if [ install_geoip == 0 ]
+then
+
+$install_geoip
+
+else
+
+echo 'GeoIP already installed'
+
+fi 
+
+echo ''
+
+
+install_ssh=$(sudo apt-get -y install ssh)
+
+if [ install_ssh == 0 ]
+then
+
+$install_ssh
+
+else
+
+
+echo 'SSH already installed'
+
+fi 
+
+echo ''
+
+install_sshpass=$(sudo apt-get -y install sshpass)
+
+if [ install_sshpass == 0 ]
+then
+
+$install_sshpass
+
+else
+
+
+echo 'Sshpass already installed'
+
+fi 
+
+echo ''
+
+#	For this section, in order to keep the clean aesthetics of the output, 
+#	2> /dev/null was used to silence the error output. (stderr)
+
+install_nipe=$(git clone https://github.com/htrgouvea/nipe 2> /dev/null)
+
+if [ install_nipe == 0 ]
+then
+
+git clone https://github.com/htrgouvea/nipe 
+
+cd nipe
+
+sudo cpan install Try::Tiny Config::Simple JSON
+
+sudo perl nipe.pl install
+
+else 
+
+echo 'Nipe already installed'
+
+fi
+
+#1.3 	Check if the network connection is anonymous
+#1.4	If the network connection is anonymous, display the spoofed IP and Country
+
+
+echo ''
+
+echo "Attempting to become anonymous.."
+
+cd nipe
+
+nipe_status=$(sudo perl nipe.pl status)
+
+nipe_start=$(sudo perl nipe.pl start)
+
+nipe_restart=$(sudo perl nipe.pl restart)
+
+
+#	The reason why nipe is restarted first is because nipe has a tendency
+#	to not start up properly on a fresh machine, in order to elimnate that,
+#	the restart command is called first then the start and one more restart 
+#	to ensure it's working.
+
+
+	$nipe_restart
+	
+	$nipe_start
+	
+	sleep 1
+	
+	$nipe_restart
+
+		spoof_ip=$(sudo perl nipe.pl status | grep Ip | awk '{print $3}')
+
+	echo ''
+
+	echo "Your Spoofed IP address is: $spoof_ip "
+
+		spoof_country=$(geoiplookup $spoof_ip | awk -F: '{print $2}')
+
+	echo "Spoofed country: $spoof_country "
+	
+
+
+echo ''
+
+#1.5	Allow the user to specify the Domain/IP Address; save into a variable 
+
+#	read commands stores user input into variables which can be called
+#	upon later in the script and used as reference
+
+echo "Specify IP/Domain to look up: " 
+read ipdomain
+
+echo ''
+
+echo "Specify Log In ID: "
+read loginid
+
+echo ''
+
+#	-s flag used to hide the user input from view
+
+echo "Specify Log In Password:"
+read -s loginpassword
+
+echo''
+
+#2.1	Display the details of the remote server (country, IP, and Uptime)
+
+#	As to remain as automated as possible, read variables was used to replace
+#	the standard method of input.
+
+#	The method that was used to automate this script 
+#	relies on the HERE Document command. This type of command tells the shell to read 
+#	input from the current source (in this case 'EOF') until a line containing the same 
+#	word is seen.
+
+# 	ssh -T flag used to accomodate the HERE Document
+
+sshpass -p $loginpassword ssh -l $loginid $ipdomain -T << 'EOF'
+
+/bin/bash
+
+	remotepublicip=$(curl -s ifconfig.io)
+
+	remoteprivateip=$(ifconfig | grep -w inet | awk '{print $2}' | head -n 1) 
+
+	echo "Remote server uptime is:"
+	uptime -p
+
+	echo ''
+	
+	echo "Remote server Public IP is:"
+	
+	curl -s ifconfig.io
+	
+	echo''
+
+	geoiplookup $remotepublicip
+	
+	echo ''
+
+
+#2.2	Get the remote server to check the Whois of the given address
+
+	echo "Public IP Address of $remoteprivateip is $remotepublicip  - Attempting to whois.."
+
+	whois -H $remotepublicip > remotewhois
+	
+	echo ''
+
+#2.3	Get the remote server to scan for open ports on the given address
+#	nmap scan to discover open ports within the remote server.
+
+	echo "Nmap scanning $remoteprivateip .."
+	
+	
+#	-Pn to treat all hosts as online -- skip host discovery
+#	-A to enable OS detection, version detection, script scanning, and traceroute
+#	-v Verbosity level - set to 0 to keep the output clean and easier to read
+#	-oN outputs the results into a file (normal output)
+
+	nmap $remoteprivateip -Pn -A -v0 -oN remotenmap
+	
+	echo ''
+
+EOF
+
+
+cd ..
+
+#	As to keep the log as updated as possible tee command is used to read 
+#	from standard input and write to both standard output and specified 
+#	file at the same time
+
+(date && hostname && echo "Retrieving whois and nmap data for: $loginid $ipdomain") | tee -a autonrscript.log
+
+echo ''
+
+#3.1	Save the Whois and Nmap data into files on the local computer
+#	Used ftp to retrieve the files instead of ssh in order to retain script reusability
+#	HERE Document again to help with file transfer
+
+ftp -n -V $ipdomain<< EOD
+
+
+quote USER $loginid
+quote PASS $loginpassword
+
+get remotewhois 
+
+get remotenmap
+
+EOD
+
+echo ''
+
+#3.2	 Create a log and audit your data collecting
+
+(date && hostname && echo "Whois and nmap data retrieved from: $loginid $ipdomain ") | tee -a autonrscript.log
+
+echo ''
+
+echo "Done. Filename: remotewhois remotenmap"
+
+echo ''
+
+
+
+ #~ Create a case option that would allow for the option of running the script again
+echo "Would you like to a) Run the script again? or b) Exit"
+
+#4.	Creativity.
+
+read runagain
+
+case $runagain in
+
+	A|a)
+	
+		AUTOSCAN
+		
+	;;
+		
+	B|b)
+		
+		echo''
+		
+		cowsay Thank you for using this script and have a good day!
+	
+		exit
+		
+	;;
+	esac
+
+AUTOSCAN
+
+}
+
+AUTOSCAN
+
+
+#~ 							REFERENCES
+
+
+#~ HERE DOCUMENTS
+#~ https://bash.cyberciti.biz/guide/Here_documents
+
+
+#~ SILENCING OUTPUT
+#~ https://www.baeldung.com/linux/silencing-bash-output#:~:text=To%20silence%20the%20output%20of%20a%20command%2C%20we%20redirect%20either,%E2%80%94%20to%20%2Fdev%2Fnull.
+
+
+#~ QUOTE USER 
+#~ QUOTE PASS
+#~ https://unix.stackexchange.com/questions/124302/how-to-specify-username-password-for-ftp
+
+#~ TEE 
+#~ https://linuxize.com/post/linux-tee-command/
+
+
+#~ 192.168.150.129 - Ubuntu VM IP that was used to run tests
+
