@@ -1,0 +1,352 @@
+#!/bin/bash
+
+#CFC3110 Network Research Project
+#Name: Warren Justin Chan
+#Code: S5
+#Class: CFC3110
+#Trainer: James
+
+#The goal is to create a script that automatically connects to a remote server
+#All the user needs to do is key in ssh IP, User ID, and Password
+#At then at the end of the script, prompt the user to exit or start again
+
+
+
+#	Script wrapped in a function and case at the end to increase usability
+
+function AUTOSCAN()
+
+{
+	
+figlet -c WARREN\'S AUTO NR SCRIPT
+
+#1.		Install the needed applications.
+#1.2	If the applications are already installed, don’t install them again
+
+#	Commands are put into a variable as it is cleaner and easier to call 
+#	upon when necessary
+
+echo "Which would you like to do first?
+
+1) Update and Upgrade (Recommended before executing script)
+2) Execute Script
+3) Exit"
+
+echo 
+read menu
+case $menu in
+
+1)	
+		sudo apt-get update 
+		sudo apt-get upgrade
+		
+AUTOSCAN
+
+
+;;
+
+2)
+
+install_cowsay=$(sudo apt-get install cowsay)
+
+if [ install_cowsay == 0 ]
+then
+
+install_cowsay
+
+else 
+
+echo 'Cowsay installed'
+
+fi
+
+echo ''
+
+install_nmap=$(sudo apt-get install nmap)
+
+if [ install_nmap == 0 ]
+then
+
+$install_nmap
+
+else
+
+echo 'Nmap successfully installed'
+
+fi
+
+echo ''
+
+
+install_geoip=$(sudo apt-get install -y geoip-bin)
+
+if [ install_geoip == 0 ]
+then
+
+$install_geoip
+
+else
+
+echo 'GeoIP successfully installed'
+
+fi 
+
+echo ''
+
+
+install_ssh=$(sudo apt-get install ssh)
+
+if [ install_ssh == 0 ]
+then
+
+$install_ssh
+
+else
+
+
+echo 'SSH successfully installed'
+
+fi 
+
+echo ''
+
+install_sshpass=$(sudo apt-get install sshpass)
+
+if [ install_sshpass == 0 ]
+then
+
+$install_sshpass
+
+else
+
+
+echo 'Sshpass successfully installed'
+
+fi 
+
+echo ''
+
+sleep 1
+
+echo "Installing Nipe.."
+
+git clone https://github.com/htrgouvea/nipe && cd nipe
+
+sudo cpan install Try::Tiny Config::Simple JSON
+
+sudo perl nipe.pl install
+
+
+sleep 1
+
+
+echo ''
+
+echo "Attempting to become anonymous.."
+
+cd nipe
+
+sudo perl nipe.pl restart
+
+if [ "$(sudo perl nipe.pl status | grep -o 'true')" == "true" ] || [ "$(sudo perl nipe.pl status | grep -o 'activated.')" == "activated." ];
+	then 
+		echo "Nipe is running."
+		else
+		echo "Nipe is not running. Exiting script"
+		exit
+fi
+
+
+	spoof_ip=$(sudo perl nipe.pl status | grep Ip | awk '{print $3}')
+
+	echo ''
+
+	echo "Your Spoofed IP address is: $spoof_ip "
+
+		spoof_country=$(geoiplookup $spoof_ip | awk -F: '{print $2}')
+
+	echo "Spoofed country: $spoof_country "
+	
+
+
+echo ''
+
+#1.5	Allow the user to specify the Domain/IP Address; save into a variable 
+
+#	read commands stores user input into variables which can be called
+#	upon later in the script and used as reference
+
+echo "Specify IP/Domain to look up: " 
+read ipdomain
+
+echo ''
+
+echo "Specify IP/Domain to target: " 	#This enables user to choose which IP to Nmap and whois scan through the remote machine
+read attackip
+
+echo ''
+
+echo "Specify Log In ID: "
+read loginid
+
+echo ''
+
+
+echo "Specify Log In Password:"
+read loginpassword
+
+echo''
+
+#2.1	Display the details of the remote server (country, IP, and Uptime)
+
+#	As to remain as automated as possible, read variables was used to replace
+#	the standard method of input.
+
+#	The method that was used to automate this script 
+#	relies on the HERE Document command. This type of command tells the shell to read 
+#	input from the current source (in this case 'EOF') until a line containing the same 
+#	word is seen.
+
+# 	ssh -T flag used to accomodate the HERE Document
+
+
+			#~ #	SSH into system
+			#~ # 	Use nmap and whois on the system (Create another variable to store ip)
+			#~ #	Save results into ssh machine. SCP file into local machine.
+			#~ #	Log everything.
+
+#~ ssh -l $loginid $ipdomain -T -o stricthostkeychecking=No 	# incase sshpass does not work, use this instead. 
+sshpass -p $loginpassword ssh -l $loginid $ipdomain -T<<EOF
+
+/bin/bash
+
+	remoteip=$(curl -s ifconfig.io)
+	
+	echo "Remote server uptime is:"
+	uptime -p
+
+	echo ''
+	
+	echo "Remote server details are as follows:"
+	curl -s ipinfo.io
+	
+	
+	echo ''
+
+
+#2.2	Get the remote server to check the Whois of the given address
+
+	echo "Attempting to whois $attackip"
+
+	whois -H $attackip > remotewhois
+	
+	echo ''
+
+#2.3	Get the remote server to scan for open ports on the given address
+#	nmap scan to discover open ports within the remote server.
+
+	echo "Nmap scanning $attackip .."
+	
+	
+#	-Pn to treat all hosts as online -- skip host discovery
+#	-A to enable OS detection, version detection, script scanning, and traceroute
+#	-v Verbosity level - set to 0 to keep the output clean and easier to read
+#	-oN outputs the results into a file (normal output)
+
+	nmap $attackip -Pn -A -v0 -oN remotenmap
+	
+	echo ''
+
+EOF
+
+
+
+
+#	As to keep the log as updated as possible tee command is used to read 
+#	from standard input and write to both standard output and specified 
+#	file at the same time
+
+(date && hostname && echo "Retrieving whois and nmap data for: $loginid $ipdomain") | tee -a autonrscript.log
+
+echo ''
+
+#3.1	Save the Whois and Nmap data into files on the local computer
+# scp -O calls for legacy SCP protocol, for backwards compatibility
+# scp -T disables strict filename checking
+sshpass -p "$loginpassword" scp -OT $loginid@$ipdomain:"remotenmap remotewhois" ./
+
+#3.2	 Create a log and audit your data collecting
+
+(date && hostname && echo "Whois and nmap data retrieved from: $loginid $ipdomain ") | tee -a autonrscript.log
+
+echo ''
+
+echo "Done. Filename: remotewhois remotenmap"
+
+echo ''
+
+
+
+ #~ Create a case option that would allow for the option of running the script again
+echo "Would you like to a) Run the script again? or b) Exit"
+
+#4.	Creativity.
+
+read runagain
+
+case $runagain in
+
+	A|a)
+	
+		AUTOSCAN
+		
+	;;
+		
+	B|b)
+		
+		echo''
+		
+		cowsay Thank you for using this script and have a good day!
+	
+		exit
+		
+	;;
+	esac
+
+AUTOSCAN
+
+;;
+
+3) 
+
+	exit
+;;
+esac
+}
+
+AUTOSCAN
+
+
+#~ 							REFERENCES
+
+
+#~ HERE DOCUMENTS
+#~ https://bash.cyberciti.biz/guide/Here_documents
+
+
+#~ SILENCING OUTPUT
+#~ https://www.baeldung.com/linux/silencing-bash-output#:~:text=To%20silence%20the%20output%20of%20a%20command%2C%20we%20redirect%20either,%E2%80%94%20to%20%2Fdev%2Fnull.
+
+
+
+#~ TEE 
+#~ https://linuxize.com/post/linux-tee-command/
+
+
+#~ IP INFO
+#~ ipinfo.io
+
+#~ SSH Stricthostkeychecking
+#~ https://linuxhint.com/ssh-stricthostkeychecking/
+
+# 192.168.211.131
